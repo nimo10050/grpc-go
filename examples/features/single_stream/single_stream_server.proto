@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option go_package = "google.golang.org/grpc/examples/singlestream";
+
+package single_stream;
+
+service SingleStreamServer {
+    rpc LotsOfReplies(StreamRequest) returns (stream StreamResponse);
+}
+
+message StreamRequest {
+    string name = 1;
+}
+
+message StreamResponse {
+    string message = 1;
+}
