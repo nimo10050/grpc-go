@@ -146,6 +146,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}()
 
+	// 网络排查工具，跳过
 	if channelz.IsOn() {
 		if cc.dopts.channelzParentID != 0 {
 			cc.channelzID = channelz.RegisterChannel(&channelzChannel{cc}, cc.dopts.channelzParentID, target)
@@ -509,7 +510,7 @@ type ClientConn struct {
 // WaitForStateChange waits until the connectivity.State of ClientConn changes from sourceState or
 // ctx expires. A true value is returned in former case and false in latter.
 //
-// Experimental
+// # Experimental
 //
 // Notice: This API is EXPERIMENTAL and may be changed or removed in a
 // later release.
@@ -528,7 +529,7 @@ func (cc *ClientConn) WaitForStateChange(ctx context.Context, sourceState connec
 
 // GetState returns the connectivity.State of ClientConn.
 //
-// Experimental
+// # Experimental
 //
 // Notice: This API is EXPERIMENTAL and may be changed or removed in a
 // later release.
@@ -782,7 +783,7 @@ func (cc *ClientConn) channelzMetric() *channelz.ChannelInternalMetric {
 
 // Target returns the target string of the ClientConn.
 //
-// Experimental
+// # Experimental
 //
 // Notice: This API is EXPERIMENTAL and may be changed or removed in a
 // later release.
@@ -838,9 +839,9 @@ func (ac *addrConn) connect() error {
 //
 // If ac is Ready, it checks whether current connected address of ac is in the
 // new addrs list.
-//  - If true, it updates ac.addrs and returns true. The ac will keep using
-//    the existing connection.
-//  - If false, it does nothing and returns false.
+//   - If true, it updates ac.addrs and returns true. The ac will keep using
+//     the existing connection.
+//   - If false, it does nothing and returns false.
 func (ac *addrConn) tryUpdateAddrs(addrs []resolver.Address) bool {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
@@ -986,7 +987,7 @@ func (cc *ClientConn) resolveNow(o resolver.ResolveNowOptions) {
 // However, if a previously unavailable network becomes available, this may be
 // used to trigger an immediate reconnect.
 //
-// Experimental
+// # Experimental
 //
 // Notice: This API is EXPERIMENTAL and may be changed or removed in a
 // later release.
@@ -1105,6 +1106,7 @@ func (ac *addrConn) adjustParams(r transport.GoAwayReason) {
 
 func (ac *addrConn) resetTransport() {
 	for i := 0; ; i++ {
+		// 如果 i > 0 如果已经连接失败了一次了
 		if i > 0 {
 			ac.cc.resolveNow(resolver.ResolveNowOptions{})
 		}
@@ -1116,6 +1118,7 @@ func (ac *addrConn) resetTransport() {
 		}
 
 		addrs := ac.addrs
+		// backoffIdx 表示第几次重试，backoffFor 需要等待的时间
 		backoffFor := ac.dopts.bs.Backoff(ac.backoffIdx)
 		// This will be the duration that dial gets to finish.
 		dialDuration := minConnectTimeout
@@ -1135,11 +1138,14 @@ func (ac *addrConn) resetTransport() {
 		// https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md#proposed-backoff-algorithm
 		connectDeadline := time.Now().Add(dialDuration)
 
+		// 设置状态为 connecting
 		ac.updateConnectivityState(connectivity.Connecting, nil)
 		ac.transport = nil
 		ac.mu.Unlock()
-
+		// 具体的连接操作
 		newTr, addr, reconnect, err := ac.tryAllAddrs(addrs, connectDeadline)
+
+		// 连接失败的后续动作
 		if err != nil {
 			// After exhausting all addresses, the addrConn enters
 			// TRANSIENT_FAILURE.
@@ -1154,14 +1160,18 @@ func (ac *addrConn) resetTransport() {
 			b := ac.resetBackoff
 			ac.mu.Unlock()
 
+			// 定时器
 			timer := time.NewTimer(backoffFor)
 			select {
+			// 超时结束后: backoffIdx + 1, 然后继续 connect
 			case <-timer.C:
 				ac.mu.Lock()
 				ac.backoffIdx++
 				ac.mu.Unlock()
+			// 不等待超时，定时器立马结束，然后继续 connect
 			case <-b:
 				timer.Stop()
+			// 上下文结束， 定时器立马结束，不再继续 connect
 			case <-ac.ctx.Done():
 				timer.Stop()
 				return
@@ -1169,6 +1179,7 @@ func (ac *addrConn) resetTransport() {
 			continue
 		}
 
+		// 到这里如果连接成功了
 		ac.mu.Lock()
 		if ac.state == connectivity.Shutdown {
 			ac.mu.Unlock()
@@ -1180,6 +1191,7 @@ func (ac *addrConn) resetTransport() {
 		ac.backoffIdx = 0
 
 		hctx, hcancel := context.WithCancel(ac.ctx)
+		// 调用健康检查
 		ac.startHealthCheck(hctx)
 		ac.mu.Unlock()
 
